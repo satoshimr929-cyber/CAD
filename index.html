@@ -676,13 +676,14 @@ function buildItems(D){
   return {items:items,bb:bb,snap:buildSnapIndex(snaps,items,bb),
     ly:{name:lyName,cnt:lyCnt}};
 }
-/* 編集後の文字要素（原点変換なし＝ENTITIES直下のみ対象） */
-function buildTextItems(e,text){
+/* 書き替え・移動後の文字要素（原点変換なし＝ENTITIES直下のみ対象） */
+function buildTextItems(e,text,dx,dy){
   const ps=textParts(e,text), out=[];
+  dx=dx||0; dy=dy||0;
   for(let k=0;k<ps.length;k++){
     const p=ps[k], s=String(p.s);
     if(!s.replace(/\s/g,'')||!(p.h>0)) continue;
-    out.push(mkText(s,p.x,p.y,p.h,p.rot,p.ha));
+    out.push(mkText(s,p.x+dx,p.y+dy,p.h,p.rot,p.ha));
   }
   return out;
 }
@@ -784,6 +785,7 @@ let HID=new Set();
 /* 取り消し用の操作履歴 */
 let hist=[];
 let hotText=null;
+let dragGhost=null;
 const hiddenLy=id=>HID.size>0&&HID.has(id);
 
 const W=()=>CV.clientWidth||1, H=()=>CV.clientHeight||1;
@@ -863,12 +865,16 @@ function draw(){
   }
   for(let i=0;i<notes.length;i++) drawNote(notes[i],false);
   if(pend&&pend.preview) drawNote(pend.preview,true);
-  if(pend&&pend.pitems){
-    for(let i=0;i<pend.pitems.length;i++){
-      const t=pend.pitems[i];
-      drawTextW(t.s,t.x,t.y,t.h,t.r,'#EE8A83',talign(t.ha));
+  const gh=(pend&&pend.pitems)||dragGhost;
+  if(gh){
+    for(let i=0;i<gh.length;i++){
+      const t=gh[i];
+      drawTextW(t.s,t.x,t.y,t.h,t.r,'#EE8A83',talign(t.ha),NMIN);
     }
   }
+  const dragging=(mode==='edit'&&gest&&gest.type==='move'&&gest.moved);
+  if(mode==='edit'&&!pend&&!dragging) drawHandles();
+  if(dragging&&cur){ drawCross(cur,true); if(snapAt) drawSnapMark(cur,snapAt.t); }
   if(mode!=='view'&&mode!=='edit'){
     if(!pend){
       const t=tempNote();
@@ -883,7 +889,7 @@ function draw(){
     if(cur){ drawCross(cur,true); if(snapAt) drawSnapMark(cur,snapAt.t); }
   }
   const hud=$('hud');
-  if(mode!=='view'&&mode!=='edit'&&cur){
+  if(cur&&(dragging||(mode!=='view'&&mode!=='edit'))){
     hud.textContent='X '+fmtN(cur[0])+'   Y '+fmtN(cur[1])+(snapAt?'   '+SNAPNAME[snapAt.t]:'');
     hud.classList.add('on');
   } else hud.classList.remove('on');
@@ -899,6 +905,13 @@ function textBox(it){
   else if(it.ha===2){ x0=-w; x1=0; }
   return [x0,-it.h*0.35,x1,it.h*1.15];
 }
+function inTextBox(it,p,tol){
+  const c=Math.cos(it.r), s=Math.sin(it.r);
+  const dx=p[0]-it.x, dy=p[1]-it.y;
+  const lx=dx*c+dy*s, ly=-dx*s+dy*c;
+  const b=textBox(it);
+  return !(lx<b[0]-tol||lx>b[2]+tol||ly<b[1]-tol||ly>b[3]+tol);
+}
 function hitText(sx,sy,any){
   if(!DOC) return null;
   const p=s2w(sx,sy), tol=12/view.s;
@@ -907,11 +920,8 @@ function hitText(sx,sy,any){
     const it=DOC.items[i];
     if(it.t!=='t'||it.dead||hiddenLy(it.ly)) continue;
     if(!it.src&&!any) continue;
-    const c=Math.cos(it.r), s=Math.sin(it.r);
-    const dx=p[0]-it.x, dy=p[1]-it.y;
-    const lx=dx*c+dy*s, ly=-dx*s+dy*c;
+    if(!inTextBox(it,p,tol)) continue;
     const b=textBox(it);
-    if(lx<b[0]-tol||lx>b[2]+tol||ly<b[1]-tol||ly>b[3]+tol) continue;
     const area=(b[2]-b[0])*(b[3]-b[1]);
     if(area<ba){ ba=area; best=it; }
   }
@@ -1088,6 +1098,126 @@ function fillTris(tris,col){
   CT.fill(); CT.restore();
 }
 
+/* ===== 5b. 修正モードでつまむ ===== */
+/* 注記の文字部分（当たり判定用の疑似アイテム） */
+function noteTextItems(n){
+  const out=[];
+  if(n.kind==='dim'){
+    const g=dimGeom(n);
+    out.push({x:g.tx,y:g.ty,h:n.h,r:g.rot,s:g.str,ha:(g.align==='center')?1:0});
+    return out;
+  }
+  const lines=String(n.str).split('\n');
+  if(n.kind==='text'){
+    const dx=Math.sin(n.rot), dy=-Math.cos(n.rot);
+    for(let k=0;k<lines.length;k++)
+      out.push({x:n.p[0]+dx*k*n.h*1.6,y:n.p[1]+dy*k*n.h*1.6,h:n.h,r:n.rot,s:lines[k],ha:0});
+    return out;
+  }
+  const g=leaderGeom(n);
+  for(let k=0;k<lines.length;k++)
+    out.push({x:g.tx,y:g.ty-k*n.h*1.6,h:n.h,r:0,s:lines[k],ha:(g.align==='right')?2:0});
+  return out;
+}
+/* つまみ: 文字=位置、引出線=矢印先と文字、寸法=測る2点と寸法線 */
+function noteHandles(n){
+  if(n.kind==='text') return [{k:'p',p:n.p}];
+  if(n.kind==='lead') return [{k:'p',p:n.p},{k:'p2',p:n.p2}];
+  return [{k:'p',p:n.p},{k:'p2',p:n.p2},{k:'p3',p:n.p3}];
+}
+/* 吸着させるつまみ（図面の点を指すもの） */
+const SNAPPART={lead:{p:1},dim:{p:1,p2:1}};
+function grabAt(sx,sy){
+  let best=null, bd=27;
+  for(let i=notes.length-1;i>=0;i--){
+    const hs=noteHandles(notes[i]);
+    for(let k=0;k<hs.length;k++){
+      const q=w2s(hs[k].p[0],hs[k].p[1]);
+      const d=Math.hypot(q[0]-sx,q[1]-sy);
+      if(d<bd){ bd=d; best={kind:'note',n:notes[i],part:hs[k].k}; }
+    }
+  }
+  if(best) return best;
+  const w=s2w(sx,sy), tol=12/view.s;
+  for(let i=notes.length-1;i>=0;i--){
+    const ts=noteTextItems(notes[i]);
+    for(let k=0;k<ts.length;k++)
+      if(inTextBox(ts[k],w,tol)) return {kind:'note',n:notes[i],part:'all'};
+  }
+  const it=hitText(sx,sy);
+  return it?{kind:'text',it:it,ent:it.src}:null;
+}
+function startGrab(g){
+  g.dx=0; g.dy=0;
+  if(g.kind==='note'){
+    g.p0=g.n.p.slice();
+    g.p20=g.n.p2?g.n.p2.slice():null;
+    g.p30=g.n.p3?g.n.p3.slice():null;
+  }else{
+    const rec=edits.get(g.ent);
+    g.text=rec?rec.text:null;
+    g.dx0=rec?rec.dx:0; g.dy0=rec?rec.dy:0;
+    g.prevItems=rec?rec.items:DOC.items.filter(q=>q.src===g.ent&&!q.dead);
+    g.prevItems.forEach(q=>{ q.dead=true; });
+    dragGhost=buildTextItems(g.ent,g.text,g.dx0,g.dy0);
+  }
+}
+function moveGrab(g,dx,dy){
+  g.dx=dx; g.dy=dy;
+  if(g.kind!=='note'){
+    dragGhost=buildTextItems(g.ent,g.text,g.dx0+dx,g.dy0+dy);
+    cur=null; snapAt=null; return;
+  }
+  const n=g.n;
+  if(g.part==='all'){
+    n.p=[g.p0[0]+dx,g.p0[1]+dy];
+    if(g.p20) n.p2=[g.p20[0]+dx,g.p20[1]+dy];
+    if(g.p30) n.p3=[g.p30[0]+dx,g.p30[1]+dy];
+    cur=null; snapAt=null; return;
+  }
+  const base=(g.part==='p')?g.p0:((g.part==='p2')?g.p20:g.p30);
+  let t=[base[0]+dx,base[1]+dy];
+  const sn=(snapOn&&SNAPPART[n.kind]&&SNAPPART[n.kind][g.part])?findSnap(t,26/view.s):null;
+  if(sn) t=[sn.x,sn.y];
+  snapAt=sn; cur=t;
+  n[g.part]=t;
+}
+function commitGrab(g){
+  if(g.kind==='note'){
+    const n=g.n, p0=g.p0, p20=g.p20, p30=g.p30;
+    hist.push({undo:function(){
+      n.p=p0.slice();
+      if(p20) n.p2=p20.slice();
+      if(p30) n.p3=p30.slice();
+    }});
+    toast('注記を動かしました',1200);
+  }else{
+    applyChange(g.ent,g.text,g.dx0+g.dx,g.dy0+g.dy,g.prevItems);
+    toast('文字を動かしました',1200);
+  }
+  dragGhost=null;
+}
+function cancelGrab(g){
+  if(g.kind==='note'){
+    g.n.p=g.p0;
+    if(g.p20) g.n.p2=g.p20;
+    if(g.p30) g.n.p3=g.p30;
+  }else g.prevItems.forEach(q=>{ q.dead=false; });
+  dragGhost=null;
+}
+function drawHandles(){
+  CT.save(); CT.lineWidth=2; CT.strokeStyle=getCss('--mark');
+  for(let i=0;i<notes.length;i++){
+    const hs=noteHandles(notes[i]);
+    for(let k=0;k<hs.length;k++){
+      const q=w2s(hs[k].p[0],hs[k].p[1]);
+      CT.beginPath(); CT.arc(q[0],q[1],6,0,Math.PI*2);
+      CT.fillStyle='#fff'; CT.fill(); CT.stroke();
+    }
+  }
+  CT.restore();
+}
+
 /* ===== 6. 操作 ===== */
 const OFFSET=62;
 const pts=new Map();
@@ -1096,8 +1226,19 @@ CV.addEventListener('pointerdown',function(ev){
   if(!DOC) return;
   try{ CV.setPointerCapture(ev.pointerId); }catch(e){}
   pts.set(ev.pointerId,{x:ev.clientX,y:ev.clientY});
-  if(pts.size>=2){ gest=startPinch(); return; }
+  if(pts.size>=2){
+    if(gest&&gest.type==='move'){ cancelGrab(gest.grab); cur=null; snapAt=null; }
+    gest=startPinch(); return;
+  }
   const r=CV.getBoundingClientRect();
+  if(mode==='edit'&&!pend){
+    const g=grabAt(ev.clientX-r.left, ev.clientY-r.top);
+    if(g){
+      startGrab(g);
+      gest={type:'move',grab:g,x:ev.clientX,y:ev.clientY,r:r,t:Date.now(),moved:false};
+      draw(); return;
+    }
+  }
   gest={type:(mode==='view'||mode==='edit')?'pan':'place',x:ev.clientX,y:ev.clientY,
         cx:view.cx,cy:view.cy,r:r,t:Date.now()};
   if(gest.type==='place') setCursor(ev.clientX-r.left, ev.clientY-r.top-OFFSET);
@@ -1112,12 +1253,31 @@ CV.addEventListener('pointermove',function(ev){
     draw();
   } else if(gest.type==='place'&&pts.size===1){
     setCursor(ev.clientX-gest.r.left, ev.clientY-gest.r.top-OFFSET);
+  } else if(gest.type==='move'&&pts.size===1){
+    if(!gest.moved&&Math.hypot(ev.clientX-gest.x,ev.clientY-gest.y)>=8) gest.moved=true;
+    if(gest.moved){
+      const a=s2w(gest.x-gest.r.left, gest.y-gest.r.top);
+      const b=s2w(ev.clientX-gest.r.left, ev.clientY-gest.r.top);
+      moveGrab(gest.grab, b[0]-a[0], b[1]-a[1]);
+      draw();
+    }
   }
 });
 function endP(ev){
   const g=gest, n=pts.size;
   pts.delete(ev.pointerId); gest=null;
-  if(g&&g.type==='pan'&&n===1&&mode==='edit'&&!pend){
+  if(!g||n!==1) return;
+  if(g.type==='move'){
+    if(g.moved) commitGrab(g.grab);
+    else{
+      cancelGrab(g.grab);
+      if(g.grab.kind==='text') openEditFor(g.grab.ent,g.grab.it);
+      else toast('注記はつまんで動かせます（○が持ち手）',1900);
+    }
+    cur=null; snapAt=null; refreshCounts(); draw(); renderPanel();
+    return;
+  }
+  if(g.type==='pan'&&mode==='edit'&&!pend){
     if(Math.hypot(ev.clientX-g.x,ev.clientY-g.y)<10&&Date.now()-g.t<800)
       tapEdit(ev.clientX-g.r.left, ev.clientY-g.r.top);
   }
@@ -1178,7 +1338,7 @@ const MSG={
 };
 function stepMsg(){
   if(mode==='edit'){
-    ctxMsg('直したい文字をタップ','図面の文字を書き替えます（動かすときは指でなぞる）');
+    ctxMsg('文字をタップ＝書き替え／なぞる＝移動','○は注記のつまみ・何も無い所をなぞると画面が動きます');
     $('cCancel').textContent='やめる';
     return;
   }
@@ -1247,10 +1407,14 @@ function tapEdit(sx,sy){
     toast(hitText(sx,sy,true)?'ブロックの中の文字は直せません':'その場所に文字がありません',1900);
     return;
   }
-  hotText=it;
-  const e=it.src, rec=edits.get(e);
-  pend={kind:'edit',ent:e,base:rec?rec.text:origText(e),orig0:origText(e),
-        prevItems:rec?rec.items:DOC.items.filter(q=>q.src===e&&!q.dead),pitems:null};
+  openEditFor(it.src,it);
+}
+function openEditFor(ent,it){
+  hotText=it||null;
+  const rec=edits.get(ent);
+  pend={kind:'edit',ent:ent,base:curText(ent),orig0:origText(ent),
+        dx:rec?rec.dx:0, dy:rec?rec.dy:0,
+        prevItems:rec?rec.items:DOC.items.filter(q=>q.src===ent&&!q.dead),pitems:null};
   pend.prevItems.forEach(q=>{ q.dead=true; });
   showSheet();
 }
@@ -1295,7 +1459,7 @@ function livePreview(){
   if(!pend) return;
   const h=parseFloat($('hVal').value)||noteH;
   if(pend.kind==='edit'){
-    pend.pitems=buildTextItems(pend.ent,$('ta').value);
+    pend.pitems=buildTextItems(pend.ent,$('ta').value,pend.dx,pend.dy);
     draw(); return;
   }
   if(pend.kind==='dim'){
@@ -1333,10 +1497,11 @@ $('sAdd').onclick=function(){
   if(!pend) return;
   if(pend.kind==='edit'){
     const t=$('ta').value.replace(/\r/g,'').replace(/[ \t]+$/,'');
-    applyEdit(pend.ent,t,pend.prevItems);
+    const same=(t===origText(pend.ent));
+    applyChange(pend.ent,t,pend.dx,pend.dy,pend.prevItems);
     pend.kept=true;
-    closeSheet(); refreshCounts();
-    toast(t.replace(/\s/g,'')?'文字を書き替えました':'文字を空にしました');
+    closeSheet(); refreshCounts(); renderPanel();
+    toast(same?'元の文字に戻しました':(t.replace(/\s/g,'')?'文字を書き替えました':'文字を空にしました'));
     return;
   }
   const h=parseFloat($('hVal').value);
@@ -1370,21 +1535,31 @@ function lyIdOf(ent){
   const i=DOC.ly.name.indexOf(nm);
   return i>=0?i:0;
 }
-function applyEdit(ent,text,prevItems){
+const curText=ent=>{ const r=edits.get(ent); return (r&&r.text!==null)?r.text:origText(ent); };
+/* 1要素ぶんの変更（text=null は文字そのまま、dx/dy は移動量） */
+function applyChange(ent,text,dx,dy,prevItems){
   const old=edits.get(ent);
-  const prevText=old?old.text:null;
   const orig=old?old.orig:prevItems;
-  const ly=prevItems.length?prevItems[0].ly:lyIdOf(ent);
+  const back=old?{text:old.text,dx:old.dx,dy:old.dy,items:old.items}:null;
+  if(text!==null&&text===origText(ent)) text=null;
+  dx=dx||0; dy=dy||0;
   prevItems.forEach(q=>{ q.dead=true; });
-  const ni=buildTextItems(ent,text);
-  ni.forEach(q=>{ q.src=ent; q.mod=true; q.ly=ly; DOC.items.push(q); });
-  const rec={ent:ent,text:text,items:ni,orig:orig};
-  edits.set(ent,rec);
+  let ni=null;
+  if(text===null&&!dx&&!dy){
+    orig.forEach(q=>{ q.dead=false; });
+    edits.delete(ent);
+  }else{
+    const ly=prevItems.length?prevItems[0].ly:lyIdOf(ent);
+    ni=buildTextItems(ent,text,dx,dy);
+    ni.forEach(q=>{ q.src=ent; q.mod=true; q.ly=ly; DOC.items.push(q); });
+    edits.set(ent,{ent:ent,text:text,dx:dx,dy:dy,items:ni,orig:orig});
+  }
   hist.push({undo:function(){
-    ni.forEach(q=>{ q.dead=true; });
+    if(ni) ni.forEach(q=>{ q.dead=true; });
+    else orig.forEach(q=>{ q.dead=true; });
     prevItems.forEach(q=>{ q.dead=false; });
-    if(prevText===null) edits.delete(ent);
-    else edits.set(ent,{ent:ent,text:prevText,items:prevItems,orig:orig});
+    if(back) edits.set(ent,{ent:ent,text:back.text,dx:back.dx,dy:back.dy,items:back.items,orig:orig});
+    else edits.delete(ent);
   }});
 }
 function revertEdit(ent){
@@ -1495,11 +1670,13 @@ function renderPanel(){
       }
     }
     if(es.length){
-      h+='<div class="sec">書き替えた文字 '+es.length+'</div>';
+      h+='<div class="sec">直した文字 '+es.length+'</div>';
       for(let i=0;i<es.length;i++){
         const r=es[i];
-        h+='<div class="prow"><span class="nm">'+esc(shorten(r.text)||'（空）')+
-           '<small>元：'+esc(shorten(origText(r.ent)))+'</small></span>'+
+        const sub=(r.text!==null?'元：'+shorten(origText(r.ent)):'')+
+          ((r.dx||r.dy)?((r.text!==null?' ／ ':'')+'位置を移動'):'');
+        h+='<div class="prow"><span class="nm">'+esc(shorten(curText(r.ent))||'（空）')+
+           '<small>'+esc(sub)+'</small></span>'+
            '<button class="pb" data-go="e'+i+'">位置</button>'+
            '<button class="pb del" data-del="e'+i+'">戻す</button></div>';
       }
@@ -1656,12 +1833,30 @@ function groupLines(e,code){
   for(let k=0;k<e.raw.length;k++) if(e.raw[k][0]===code) out.push(e.raw[k][2]);
   return out;
 }
+/* 既存文字の移動を、座標のグループコードだけ差し替える形にする */
+function posOps(rec,eol,enc){
+  const e=rec.ent, st=DOC.starts, ops=[];
+  if(!rec.dx&&!rec.dy) return ops;
+  const endOf=li=>(li+2<st.length)?st[li+2]:DOC.bytes.length;
+  const put=function(code,val){
+    const l=groupLines(e,code);
+    if(!l.length||st[l[0]]===undefined) return;
+    ops.push({start:st[l[0]],end:endOf(l[0]),bytes:encStr(String(code)+eol+fx(val)+eol,enc)});
+  };
+  put(10,N(e,10)+rec.dx); put(20,N(e,20)+rec.dy);
+  /* MTEXTの11/21は方向ベクトルなので動かさない */
+  if(e.type!=='MTEXT'&&e.g[11]!==undefined){
+    put(11,N(e,11)+rec.dx); put(21,N(e,21)+rec.dy);
+  }
+  return ops;
+}
 /* 既存文字の書き替えを、元バイト列の該当行だけ差し替える形にする */
 function editOps(rec,eol,enc){
   const e=rec.ent, st=DOC.starts, ops=[];
-  const endOf=li=>(li+2<st.length)?st[li+2]:DOC.bytes.length;
+  if(rec.text===null) return ops;
   const l1=groupLines(e,1);
   if(!l1.length||st[l1[0]]===undefined) return ops;
+  const endOf=li=>(li+2<st.length)?st[li+2]:DOC.bytes.length;
   if(e.type==='MTEXT'){
     const l3=groupLines(e,3);
     for(let k=0;k<l3.length;k++)
@@ -1760,7 +1955,7 @@ function buildOut(){
   const ops=[];
   if(L.length) ops.push({start:at(D.ins.ENTITIES),end:at(D.ins.ENTITIES),bytes:chunk(L)});
   edits.forEach(function(rec){
-    const eo=editOps(rec,eol,enc);
+    const eo=editOps(rec,eol,enc).concat(posOps(rec,eol,enc));
     for(let k=0;k<eo.length;k++) ops.push(eo[k]);
   });
 
