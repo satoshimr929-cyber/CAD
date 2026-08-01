@@ -1,0 +1,1367 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#101317">
+<title>DXF 現場注記</title>
+<style>
+:root{
+  --ink:#101317; --panel:#171B21; --edge:#2B323B;
+  --paper:#F4F3EE; --draw:#454B54;
+  --mark:#D8342A; --hi:#F5C518; --snap:#0B6BCB;
+  --txt:#E9EAEC; --dim:#878E98;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
+  --ui:system-ui,-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif;
+  --kb:0px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--ink);color:var(--txt);
+  font-family:var(--ui);overscroll-behavior:none;touch-action:none;
+  -webkit-user-select:none;user-select:none}
+#app{position:fixed;inset:0;display:flex;flex-direction:column}
+
+#bar{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:0 10px;
+  padding-top:env(safe-area-inset-top);height:calc(46px + env(safe-area-inset-top));
+  background:var(--panel);border-bottom:1px solid var(--edge)}
+.brand{font:600 11px/1 var(--mono);letter-spacing:.22em;color:var(--hi);flex:0 0 auto}
+#fname{flex:1 1 auto;min-width:0;font:400 11px/1.3 var(--mono);color:var(--dim);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tbtn{flex:0 0 auto;height:30px;padding:0 9px;border:1px solid var(--edge);border-radius:6px;
+  background:transparent;color:var(--txt);font:500 12px/1 var(--ui);display:flex;align-items:center}
+.tbtn:disabled{opacity:.32}
+.tbtn.on{background:var(--snap);border-color:var(--snap);color:#fff;font-weight:700}
+@media (max-width:430px){ .brand{display:none} #bar{gap:6px} }
+
+#stage{position:relative;flex:1 1 auto;min-height:0;background:var(--paper)}
+canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+#drop{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:18px;background:var(--ink);padding:28px;text-align:center}
+#drop h1{margin:0;font:700 20px/1.4 var(--ui)}
+#drop p{margin:0;font:400 13px/1.7 var(--ui);color:var(--dim);max-width:22em}
+.big{height:52px;padding:0 26px;border:0;border-radius:8px;background:var(--hi);color:#101317;
+  font:700 15px/1 var(--ui)}
+#hud{position:absolute;left:8px;bottom:8px;padding:5px 9px;border-radius:5px;
+  background:rgba(16,19,23,.82);color:var(--hi);font:500 11px/1.4 var(--mono);
+  pointer-events:none;opacity:0;transition:opacity .15s}
+#hud.on{opacity:1}
+#toast{position:absolute;left:50%;top:12px;transform:translateX(-50%);max-width:92%;
+  padding:8px 14px;border-radius:6px;background:rgba(16,19,23,.9);color:var(--txt);
+  font:500 12.5px/1.4 var(--ui);pointer-events:none;opacity:0;transition:opacity .2s}
+#toast.on{opacity:1}
+
+#ctx{flex:0 0 auto;display:none;align-items:center;gap:8px;padding:7px 10px;
+  background:#20252C;border-top:1px solid var(--edge)}
+#ctx.on{display:flex}
+#ctxmsg{flex:1 1 auto;font:500 12.5px/1.4 var(--ui);color:var(--txt);min-width:0}
+#ctxmsg small{display:block;color:var(--dim);font-size:11px;font-weight:400}
+.cb{flex:0 0 auto;height:38px;padding:0 15px;border-radius:7px;border:1px solid var(--edge);
+  background:transparent;color:var(--txt);font:500 13px/1 var(--ui)}
+.cb.go{background:var(--hi);border-color:var(--hi);color:#101317;font-weight:700}
+
+#dock{flex:0 0 auto;display:flex;gap:6px;padding:7px 8px;
+  padding-bottom:calc(7px + env(safe-area-inset-bottom));
+  background:var(--panel);border-top:1px solid var(--edge)}
+.mb{flex:1 1 0;height:50px;border-radius:8px;border:1px solid var(--edge);background:transparent;
+  color:var(--txt);font:500 12px/1.3 var(--ui);display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:3px}
+.mb .ic{font-size:17px;line-height:1}
+.mb.on{background:var(--hi);border-color:var(--hi);color:#101317;font-weight:700}
+.mb.save{background:#2A3038;border-color:#39414B}
+.mb:disabled{opacity:.32}
+
+#sheet{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--panel);
+  border-top:1px solid var(--edge);border-radius:14px 14px 0 0;padding:14px;
+  padding-bottom:calc(14px + env(safe-area-inset-bottom));
+  transform:translateY(115%);transition:transform .22s ease;margin-bottom:var(--kb)}
+#sheet.on{transform:translateY(0)}
+#veil{position:fixed;inset:0;z-index:19;background:rgba(0,0,0,.5);opacity:0;
+  pointer-events:none;transition:opacity .2s}
+#veil.on{opacity:1;pointer-events:auto}
+#sheet h2{margin:0 0 10px;font:600 12px/1 var(--mono);letter-spacing:.16em;color:var(--hi)}
+#ta{width:100%;height:74px;resize:none;border-radius:8px;border:1px solid var(--edge);
+  background:#0D1014;color:var(--txt);padding:10px;font:400 16px/1.5 var(--ui);
+  -webkit-user-select:text;user-select:text}
+#ta:focus{outline:2px solid var(--hi);outline-offset:-1px}
+.row{display:flex;align-items:center;gap:8px;margin-top:10px}
+.row label{font:500 12px/1 var(--ui);color:var(--dim);flex:0 0 auto;width:4.8em}
+.step{display:flex;align-items:center;border:1px solid var(--edge);border-radius:7px;overflow:hidden}
+.step button{width:40px;height:38px;border:0;background:transparent;color:var(--txt);font:400 19px/1 var(--ui)}
+.step input{width:78px;height:38px;border:0;border-left:1px solid var(--edge);
+  border-right:1px solid var(--edge);background:#0D1014;color:var(--txt);
+  text-align:center;font:500 14px/1 var(--mono);-webkit-user-select:text;user-select:text}
+.row input.wide{flex:1 1 auto;min-width:0;height:38px;border:1px solid var(--edge);border-radius:7px;
+  background:#0D1014;color:var(--txt);padding:0 10px;font:500 15px/1 var(--mono);
+  -webkit-user-select:text;user-select:text}
+.row .cb{height:38px}
+.seg{display:flex;border:1px solid var(--edge);border-radius:7px;overflow:hidden}
+.seg button{height:38px;padding:0 14px;border:0;background:transparent;color:var(--dim);
+  font:500 13px/1 var(--ui)}
+.seg button.on{background:var(--hi);color:#101317;font-weight:700}
+.acts{display:flex;gap:8px;margin-top:14px}
+.acts button{flex:1 1 0;height:46px;border-radius:8px;border:1px solid var(--edge);
+  background:transparent;color:var(--txt);font:500 14px/1 var(--ui)}
+.acts button.go{background:var(--hi);border-color:var(--hi);color:#101317;font-weight:700}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="bar">
+    <span class="brand">DXF NOTE</span>
+    <span id="fname">ファイル未選択</span>
+    <button class="tbtn" id="bFit" disabled>全体</button>
+    <button class="tbtn on" id="bSnap">吸着</button>
+    <button class="tbtn" id="bUndo" disabled>戻す</button>
+    <button class="tbtn" id="bOpen">開く</button>
+  </div>
+
+  <div id="stage">
+    <canvas id="cv"></canvas>
+    <div id="hud"></div>
+    <div id="toast"></div>
+    <div id="drop">
+      <h1>DXFに注記を書き足す</h1>
+      <p>図面を開いて、文字や引出線を追記します。元の図形は書き換えず、追記分だけを足して保存します。</p>
+      <button class="big" id="bOpen2">DXFファイルを開く</button>
+    </div>
+  </div>
+
+  <div id="ctx">
+    <div id="ctxmsg"></div>
+    <button class="cb" id="cCancel">やめる</button>
+    <button class="cb go" id="cOk">決定</button>
+  </div>
+
+  <div id="dock">
+    <button class="mb on" id="mView"><span class="ic">✥</span>移動</button>
+    <button class="mb" id="mText" disabled><span class="ic">A</span>文字</button>
+    <button class="mb" id="mLead" disabled><span class="ic">↗</span>引出線</button>
+    <button class="mb" id="mDim" disabled><span class="ic">↔</span>寸法</button>
+    <button class="mb save" id="mSave" disabled><span class="ic">⤓</span>保存</button>
+  </div>
+</div>
+
+<div id="veil"></div>
+<div id="sheet">
+  <h2 id="sTitle">NOTE</h2>
+  <div id="taRow"><textarea id="ta" placeholder="注記の文字（改行できます）"></textarea></div>
+  <div class="row" id="dimRow">
+    <label>寸法値</label>
+    <input id="dVal" class="wide" inputmode="text" placeholder="自動">
+    <button class="cb" id="dReset">自動</button>
+  </div>
+  <div class="row">
+    <label>文字高さ</label>
+    <div class="step">
+      <button id="hMinus">−</button><input id="hVal" inputmode="decimal" value="100"><button id="hPlus">＋</button>
+    </div>
+  </div>
+  <div class="row" id="rotRow">
+    <label>角度</label>
+    <div class="seg" id="rotSeg">
+      <button data-r="0" class="on">0°</button><button data-r="90">90°</button><button data-r="270">270°</button>
+    </div>
+  </div>
+  <div class="row" id="dirRow">
+    <label>向き</label>
+    <div class="seg" id="dirSeg">
+      <button data-d="auto" class="on">自動</button><button data-d="h">水平</button><button data-d="v">垂直</button><button data-d="a">平行</button>
+    </div>
+  </div>
+  <div class="row" id="decRow">
+    <label>小数桁</label>
+    <div class="seg" id="decSeg">
+      <button data-c="0" class="on">0</button><button data-c="1">1</button><button data-c="2">2</button>
+    </div>
+  </div>
+  <div class="acts">
+    <button id="sCancel">キャンセル</button>
+    <button id="sAdd" class="go">追加</button>
+  </div>
+</div>
+
+<input type="file" id="fi" style="position:absolute;left:-9999px">
+
+<script>
+"use strict";
+const $=s=>document.getElementById(s);
+const CV=$('cv'), CT=CV.getContext('2d');
+const FONT='system-ui,-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif';
+
+/* ===== 1. バイト列 → 行 → グループコード対 ===== */
+function lineStarts(bytes){
+  const st=[0];
+  for(let i=0;i<bytes.length;i++) if(bytes[i]===10) st.push(i+1);
+  return st;
+}
+function detectEnc(bytes){
+  try{ new TextDecoder('utf-8',{fatal:true}).decode(bytes); return 'utf-8'; }catch(e){}
+  let cp='';
+  try{
+    const head=new TextDecoder('windows-1252').decode(bytes.subarray(0,Math.min(bytes.length,300000)));
+    const m=head.match(/\$DWGCODEPAGE[\r\n]+\s*3[\r\n]+\s*([^\r\n]+)/);
+    if(m) cp=(m[1].match(/\d+/)||[''])[0];
+  }catch(e){}
+  const map={'932':'shift_jis','936':'gbk','950':'big5','949':'euc-kr',
+             '1252':'windows-1252','1250':'windows-1250','1251':'windows-1251'};
+  return map[cp]||'shift_jis';
+}
+function makePairs(txt){
+  const raw=txt.split('\n');
+  const P=[];
+  for(let i=0;i+1<raw.length;i++){
+    const cs=raw[i].replace(/[\r\s]/g,'');
+    if(cs===''||!/^-?\d+$/.test(cs)) continue;
+    let v=raw[i+1];
+    if(v.endsWith('\r')) v=v.slice(0,-1);
+    P.push([parseInt(cs,10),v,i]);
+    i++;
+  }
+  return P;
+}
+
+/* ===== 2. 構造スキャン ===== */
+function readEnt(P,i){
+  const type=P[i][1].trim(); const raw=[]; i++;
+  while(i<P.length && P[i][0]!==0){ raw.push([P[i][0],P[i][1]]); i++; }
+  const g={};
+  for(let k=0;k<raw.length;k++){ const c=raw[k][0]; (g[c]=g[c]||[]).push(raw[k][1]); }
+  return [{type,raw,g},i];
+}
+function N(e,c,k,d){
+  const a=e.g[c]; const dv=(d===undefined?0:d);
+  if(!a||a[k||0]===undefined) return dv;
+  const x=parseFloat(a[k||0]); return isFinite(x)?x:dv;
+}
+function S(e,c,d){ const a=e.g[c]; return (a&&a[0]!==undefined)?a[0]:(d===undefined?'':d); }
+
+function readList(P,i,stop){
+  const out=[];
+  while(i<P.length){
+    if(P[i][0]===0){
+      const w=P[i][1].trim();
+      if(stop.indexOf(w)>=0) return [out,i];
+      let e; const r=readEnt(P,i); e=r[0]; i=r[1];
+      if(e.type==='POLYLINE'){
+        e.verts=[];
+        while(i<P.length && P[i][0]===0 && P[i][1].trim()==='VERTEX'){
+          const rv=readEnt(P,i); e.verts.push(rv[0]); i=rv[1];
+        }
+        if(i<P.length && P[i][0]===0 && P[i][1].trim()==='SEQEND'){ i=readEnt(P,i)[1]; }
+      }
+      if(e.type!=='SEQEND') out.push(e);
+    } else i++;
+  }
+  return [out,i];
+}
+
+function scan(P){
+  const D={vars:{},blocks:{},ents:[],layers:{},styles:{},ins:{},maxH:0};
+  for(let k=0;k<P.length;k++){
+    if(P[k][0]===5||P[k][0]===105){
+      const h=parseInt(P[k][1].trim(),16);
+      if(isFinite(h)&&h>D.maxH) D.maxH=h;
+    }
+  }
+  let i=0;
+  while(i<P.length){
+    if(P[i][0]===0&&P[i][1].trim()==='SECTION'){
+      const nm=(P[i+1]&&P[i+1][0]===2)?P[i+1][1].trim():'';
+      i+=2;
+      if(nm==='HEADER'){
+        let cur=null;
+        while(i<P.length&&!(P[i][0]===0&&P[i][1].trim()==='ENDSEC')){
+          if(P[i][0]===9) cur=P[i][1].trim();
+          else if(cur&&D.vars[cur]===undefined) D.vars[cur]={c:P[i][0],v:P[i][1],li:P[i][2]+1};
+          i++;
+        }
+      } else if(nm==='TABLES'){
+        let tb=null;
+        while(i<P.length&&!(P[i][0]===0&&P[i][1].trim()==='ENDSEC')){
+          const w=(P[i][0]===0)?P[i][1].trim():null;
+          if(w==='TABLE'){ tb=(P[i+1]&&P[i+1][0]===2)?P[i+1][1].trim():null; }
+          else if(w==='ENDTAB'){ if(tb) D.ins[tb]=P[i][2]; tb=null; }
+          else if(w==='LAYER'||w==='STYLE'){
+            let j=i+1,nam=null;
+            while(j<P.length&&P[j][0]!==0){ if(P[j][0]===2&&nam===null) nam=P[j][1].trim(); j++; }
+            if(nam) (w==='LAYER'?D.layers:D.styles)[nam.toUpperCase()]=1;
+          }
+          i++;
+        }
+      } else if(nm==='BLOCKS'){
+        while(i<P.length&&!(P[i][0]===0&&P[i][1].trim()==='ENDSEC')){
+          if(P[i][0]===0&&P[i][1].trim()==='BLOCK'){
+            const rb=readEnt(P,i); const b=rb[0]; i=rb[1];
+            const name=S(b,2,'').trim();
+            const rl=readList(P,i,['ENDBLK','ENDSEC']); i=rl[1];
+            if(i<P.length&&P[i][0]===0&&P[i][1].trim()==='ENDBLK') i=readEnt(P,i)[1];
+            if(name) D.blocks[name.toUpperCase()]={base:[N(b,10),N(b,20)],ents:rl[0]};
+          } else i++;
+        }
+      } else if(nm==='ENTITIES'){
+        const rl=readList(P,i,['ENDSEC']); D.ents=rl[0]; i=rl[1];
+        if(i<P.length) D.ins.ENTITIES=P[i][2];
+      } else {
+        while(i<P.length&&!(P[i][0]===0&&P[i][1].trim()==='ENDSEC')) i++;
+      }
+    } else i++;
+  }
+  return D;
+}
+
+/* ===== 3. 図形展開（すべて折れ線＋文字に） ===== */
+function mmul(A,B){
+  return [A[0]*B[0]+A[2]*B[1], A[1]*B[0]+A[3]*B[1],
+          A[0]*B[2]+A[2]*B[3], A[1]*B[2]+A[3]*B[3],
+          A[0]*B[4]+A[2]*B[5]+A[4], A[1]*B[4]+A[3]*B[5]+A[5]];
+}
+const mapPt=(M,x,y)=>[M[0]*x+M[2]*y+M[4], M[1]*x+M[3]*y+M[5]];
+
+function decodeStr(s){
+  s=s.replace(/\\U\+([0-9A-Fa-f]{4})/g,function(m,h){return String.fromCharCode(parseInt(h,16));});
+  s=s.replace(/%%[dD]/g,'\u00B0').replace(/%%[cC]/g,'\u2300').replace(/%%[pP]/g,'\u00B1').replace(/%%%/g,'%');
+  return s.replace(/%%[uUoO]/g,'');
+}
+function stripM(s){
+  s=s.replace(/\\P/g,'\n').replace(/\\~/g,' ');
+  s=s.replace(/\\[A-Za-z][^;\\]{0,80};/g,'');
+  s=s.replace(/[{}]/g,'');
+  return s.replace(/\\([\\{}])/g,'$1');
+}
+function arcPts(cx,cy,r,a0,a1){
+  let sw=a1-a0; while(sw<=1e-12) sw+=Math.PI*2;
+  const n=Math.max(6,Math.min(160,Math.ceil(sw/(Math.PI*2)*72)));
+  const p=[];
+  for(let k=0;k<=n;k++){ const a=a0+sw*k/n; p.push([cx+r*Math.cos(a),cy+r*Math.sin(a)]); }
+  return p;
+}
+function bulgePts(p1,p2,b){
+  const th=4*Math.atan(b);
+  const dx=p2[0]-p1[0], dy=p2[1]-p1[1], c=Math.hypot(dx,dy);
+  if(c<1e-12||Math.abs(th)<1e-9) return [p2];
+  const r=Math.abs(c/(2*Math.sin(th/2)));
+  const h=(c/2)/Math.tan(th/2);
+  const cx=(p1[0]+p2[0])/2+(-dy/c)*h, cy=(p1[1]+p2[1])/2+(dx/c)*h;
+  const a0=Math.atan2(p1[1]-cy,p1[0]-cx);
+  const n=Math.max(4,Math.min(96,Math.ceil(Math.abs(th)/(Math.PI*2)*72)));
+  const out=[];
+  for(let k=1;k<=n;k++){ const a=a0+th*k/n; out.push([cx+r*Math.cos(a),cy+r*Math.sin(a)]); }
+  return out;
+}
+function estW(s,h){
+  let w=0;
+  for(const ch of s) w+=(ch.charCodeAt(0)<0x100)?0.58:1.0;
+  return w*h;
+}
+
+/* スナップ種別: 0端点 1中点 2中心 3四半点 4挿入点 5線上 */
+const SNAPNAME=['端点','中点','中心','四半点','挿入点','線上'];
+function buildItems(D){
+  const items=[];
+  const snaps=[];
+  const bb=[Infinity,Infinity,-Infinity,-Infinity];
+  function grow(x,y){ if(x<bb[0])bb[0]=x; if(y<bb[1])bb[1]=y; if(x>bb[2])bb[2]=x; if(y>bb[3])bb[3]=y; }
+  function addSnap(x,y,t,M){
+    if(snaps.length>=900000) return;
+    const q=mapPt(M,x,y);
+    if(!isFinite(q[0])||!isFinite(q[1])) return;
+    snaps.push(q[0],q[1],t);
+  }
+
+  function pushPoly(pts,M,closed){
+    if(!pts||pts.length<2) return;
+    const a=new Float64Array(pts.length*2);
+    let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
+    for(let k=0;k<pts.length;k++){
+      const q=mapPt(M,pts[k][0],pts[k][1]);
+      if(!isFinite(q[0])||!isFinite(q[1])) return;
+      a[k*2]=q[0]; a[k*2+1]=q[1];
+      if(q[0]<x0)x0=q[0]; if(q[1]<y0)y0=q[1]; if(q[0]>x1)x1=q[0]; if(q[1]>y1)y1=q[1];
+    }
+    grow(x0,y0); grow(x1,y1);
+    items.push({t:'p',a:a,closed:!!closed,bb:[x0,y0,x1,y1]});
+  }
+  function pushText(str,x,y,h,rot,M,ha){
+    str=String(str);
+    if(!str.replace(/\s/g,'')) return;
+    const q=mapPt(M,x,y);
+    if(!isFinite(q[0])||!isFinite(q[1])) return;
+    const sc=Math.sqrt(Math.abs(M[0]*M[3]-M[1]*M[2]))||1;
+    const hh=h*sc;
+    if(!(hh>0)) return;
+    const w=estW(str,hh);
+    grow(q[0]-w,q[1]-hh); grow(q[0]+w,q[1]+hh);
+    items.push({t:'t',x:q[0],y:q[1],h:hh,r:rot+Math.atan2(M[1],M[0]),s:str,ha:ha||0,
+      bb:[q[0]-w,q[1]-hh*0.5,q[0]+w,q[1]+hh*1.3]});
+  }
+
+  function emit(list,M,depth){
+    if(depth>8) return;
+    for(let ei=0;ei<list.length;ei++){
+      const e=list[ei];
+      switch(e.type){
+        case 'LINE': {
+          const a=[N(e,10),N(e,20)], b=[N(e,11),N(e,21)];
+          pushPoly([a,b],M,false);
+          addSnap(a[0],a[1],0,M); addSnap(b[0],b[1],0,M);
+          addSnap((a[0]+b[0])/2,(a[1]+b[1])/2,1,M);
+          break;
+        }
+        case 'POINT': { const x=N(e,10),y=N(e,20); pushPoly([[x,y],[x,y]],M,false); addSnap(x,y,0,M); break; }
+        case '3DFACE': case 'SOLID': case 'TRACE': {
+          const p=[[N(e,10),N(e,20)],[N(e,11),N(e,21)],[N(e,12),N(e,22)]];
+          if(e.g[13]!==undefined) p.push([N(e,13),N(e,23)]);
+          if(e.type!=='3DFACE'&&p.length===4){ const t=p[2]; p[2]=p[3]; p[3]=t; }
+          for(let k=0;k<p.length;k++) addSnap(p[k][0],p[k][1],0,M);
+          pushPoly(p,M,true); break;
+        }
+        case 'CIRCLE': {
+          const cx=N(e,10),cy=N(e,20),r=N(e,40);
+          pushPoly(arcPts(cx,cy,r,0,Math.PI*2-1e-9),M,true);
+          addSnap(cx,cy,2,M);
+          addSnap(cx+r,cy,3,M); addSnap(cx-r,cy,3,M);
+          addSnap(cx,cy+r,3,M); addSnap(cx,cy-r,3,M);
+          break;
+        }
+        case 'ARC': {
+          const cx=N(e,10),cy=N(e,20),r=N(e,40);
+          const a0=N(e,50)*Math.PI/180, a1=N(e,51)*Math.PI/180;
+          pushPoly(arcPts(cx,cy,r,a0,a1),M,false);
+          let sw=a1-a0; while(sw<=1e-12) sw+=Math.PI*2;
+          addSnap(cx,cy,2,M);
+          addSnap(cx+r*Math.cos(a0),cy+r*Math.sin(a0),0,M);
+          addSnap(cx+r*Math.cos(a1),cy+r*Math.sin(a1),0,M);
+          addSnap(cx+r*Math.cos(a0+sw/2),cy+r*Math.sin(a0+sw/2),1,M);
+          break;
+        }
+        case 'ELLIPSE': {
+          const cx=N(e,10),cy=N(e,20),mx=N(e,11),my=N(e,21),ra=N(e,40,0,1);
+          const t0=N(e,41,0,0),t1=N(e,42,0,Math.PI*2);
+          const ma=Math.hypot(mx,my), ang=Math.atan2(my,mx);
+          let sw=t1-t0; if(sw<=1e-12) sw+=Math.PI*2;
+          const n=Math.max(12,Math.min(160,Math.ceil(sw/(Math.PI*2)*96))), p=[];
+          for(let k=0;k<=n;k++){
+            const t=t0+sw*k/n, ex=ma*Math.cos(t), ey=ma*ra*Math.sin(t);
+            p.push([cx+ex*Math.cos(ang)-ey*Math.sin(ang), cy+ex*Math.sin(ang)+ey*Math.cos(ang)]);
+          }
+          pushPoly(p,M,false); addSnap(cx,cy,2,M); break;
+        }
+        case 'LWPOLYLINE': {
+          const closed=(N(e,70)&1)===1;
+          const vs=[]; let cv=null;
+          for(let k=0;k<e.raw.length;k++){
+            const c=e.raw[k][0], v=parseFloat(e.raw[k][1]);
+            if(c===10){ if(cv) vs.push(cv); cv={x:isFinite(v)?v:0,y:0,b:0}; }
+            else if(c===20&&cv) cv.y=isFinite(v)?v:0;
+            else if(c===42&&cv) cv.b=isFinite(v)?v:0;
+          }
+          if(cv) vs.push(cv);
+          if(vs.length<2) break;
+          for(let k=0;k<vs.length;k++){
+            addSnap(vs[k].x,vs[k].y,0,M);
+            const w2=vs[(k+1)%vs.length];
+            if((k<vs.length-1||closed)&&Math.abs(vs[k].b)<1e-9)
+              addSnap((vs[k].x+w2.x)/2,(vs[k].y+w2.y)/2,1,M);
+          }
+          const pts=[[vs[0].x,vs[0].y]];
+          const lim=closed?vs.length:vs.length-1;
+          for(let k=0;k<lim;k++){
+            const a=vs[k], b2=vs[(k+1)%vs.length];
+            if(Math.abs(a.b)>1e-9){ const seg=bulgePts([a.x,a.y],[b2.x,b2.y],a.b);
+              for(let q=0;q<seg.length;q++) pts.push(seg[q]); }
+            else pts.push([b2.x,b2.y]);
+          }
+          pushPoly(pts,M,closed); break;
+        }
+        case 'POLYLINE': {
+          const vs=e.verts||[]; if(!vs.length) break;
+          const flag=N(e,70);
+          if(flag&64){ for(let k=0;k<vs.length;k++){ const x=N(vs[k],10),y=N(vs[k],20);
+            pushPoly([[x,y],[x,y]],M,false); } break; }
+          const pts=[]; let prev=null;
+          for(let k=0;k<vs.length;k++){
+            if(vs[k].g[10]===undefined) continue;
+            const x=N(vs[k],10), y=N(vs[k],20);
+            addSnap(x,y,0,M);
+            const q=vs[k+1];
+            if(q&&q.g[10]!==undefined&&Math.abs(N(vs[k],42))<1e-9)
+              addSnap((x+N(q,10))/2,(y+N(q,20))/2,1,M);
+          }
+          for(let k=0;k<vs.length;k++){
+            const v=vs[k];
+            if(v.g[10]===undefined) continue;
+            const p=[N(v,10),N(v,20)];
+            if(prev&&Math.abs(N(prev,42))>1e-9){
+              const seg=bulgePts([N(prev,10),N(prev,20)],p,N(prev,42));
+              for(let q=0;q<seg.length;q++) pts.push(seg[q]);
+            } else pts.push(p);
+            prev=v;
+          }
+          if((flag&1)&&prev&&pts.length>1){
+            if(Math.abs(N(prev,42))>1e-9){
+              const seg=bulgePts([N(prev,10),N(prev,20)],pts[0],N(prev,42));
+              for(let q=0;q<seg.length;q++) pts.push(seg[q]);
+            } else pts.push(pts[0]);
+          }
+          pushPoly(pts,M,false); break;
+        }
+        case 'SPLINE': {
+          const p=[]; const fx=e.g[11], fy=e.g[21];
+          if(fx&&fy&&fx.length>1){
+            for(let k=0;k<Math.min(fx.length,fy.length);k++)
+              p.push([parseFloat(fx[k])||0,parseFloat(fy[k])||0]);
+          } else {
+            const cx=e.g[10], cy=e.g[20];
+            if(cx&&cy) for(let k=0;k<Math.min(cx.length,cy.length);k++)
+              p.push([parseFloat(cx[k])||0,parseFloat(cy[k])||0]);
+          }
+          pushPoly(p,M,false); break;
+        }
+        case 'TEXT': case 'ATTRIB': {
+          const ha=N(e,72);
+          let x=N(e,10), y=N(e,20);
+          if((ha!==0||N(e,73)!==0)&&e.g[11]!==undefined){ x=N(e,11); y=N(e,21); }
+          pushText(decodeStr(S(e,1)),x,y,N(e,40,0,1),N(e,50)*Math.PI/180,M,ha);
+          break;
+        }
+        case 'MTEXT': {
+          const joined=(e.g[3]||[]).join('')+S(e,1);
+          const txt=decodeStr(stripM(joined));
+          const h=N(e,40,0,1);
+          let rot=N(e,50)*Math.PI/180;
+          if(e.g[11]!==undefined) rot=Math.atan2(N(e,21),N(e,11,0,1));
+          const at=N(e,71,0,1);
+          const lines=txt.split('\n');
+          const dx=Math.sin(rot), dy=-Math.cos(rot);
+          const top=(at<=3)?0:(at<=6?(lines.length-1)/2:(lines.length-1));
+          for(let k=0;k<lines.length;k++){
+            const d=(k-top)*h*1.5;
+            pushText(lines[k],N(e,10)+dx*d,N(e,20)+dy*d-h*0.85,h,rot,M,0);
+          }
+          break;
+        }
+        case 'INSERT': case 'DIMENSION': {
+          const B=D.blocks[S(e,2,'').trim().toUpperCase()];
+          if(!B) break;
+          if(e.type==='DIMENSION'){ emit(B.ents,M,depth+1); break; }
+          const px=N(e,10),py=N(e,20);
+          const sx=N(e,41,0,1)||1, sy=N(e,42,0,1)||1;
+          const ro=N(e,50)*Math.PI/180;
+          const cn=Math.min(Math.max(1,N(e,70,0,1)||1),40);
+          const rn=Math.min(Math.max(1,N(e,71,0,1)||1),40);
+          const cs=N(e,44), rs=N(e,45);
+          const co=Math.cos(ro), si=Math.sin(ro);
+          const T=[1,0,0,1,-B.base[0],-B.base[1]];
+          for(let ci=0;ci<cn;ci++) for(let ri=0;ri<rn;ri++){
+            const ox=ci*cs, oy=ri*rs;
+            const gx=px+ox*co-oy*si, gy=py+ox*si+oy*co;
+            addSnap(gx,gy,4,M);
+            const L=[sx*co, sx*si, -sy*si, sy*co, gx, gy];
+            emit(B.ents, mmul(M,mmul(L,T)), depth+1);
+          }
+          break;
+        }
+        default: break;
+      }
+    }
+  }
+  emit(D.ents,[1,0,0,1,0,0],0);
+  if(!isFinite(bb[0])){ bb[0]=0;bb[1]=0;bb[2]=1000;bb[3]=1000; }
+  return {items:items,bb:bb,snap:buildSnapIndex(snaps,items,bb)};
+}
+
+/* ===== 3b. スナップ索引 ===== */
+function buildSnapIndex(flat,items,bb){
+  const tol=Math.max((bb[2]-bb[0]+bb[3]-bb[1])*5e-7,1e-9);
+  const keep=new Map();
+  for(let i=0;i<flat.length;i+=3){
+    const k=Math.round(flat[i]/tol)+','+Math.round(flat[i+1]/tol);
+    const p=keep.get(k);
+    if(p===undefined||flat[i+2]<flat[p+2]) keep.set(k,i);
+  }
+  const n=keep.size;
+  const X=new Float64Array(n), Y=new Float64Array(n), T=new Uint8Array(n);
+  let w=0;
+  keep.forEach(function(i){ X[w]=flat[i]; Y[w]=flat[i+1]; T[w]=flat[i+2]; w++; });
+  const cells=Math.max(1,Math.min(220,Math.ceil(Math.sqrt(Math.max(n,items.length)/3))));
+  const cw=Math.max((bb[2]-bb[0])/cells,1e-9), ch=Math.max((bb[3]-bb[1])/cells,1e-9);
+  const pg=new Map();
+  for(let i=0;i<n;i++){
+    const k=Math.floor((X[i]-bb[0])/cw)+','+Math.floor((Y[i]-bb[1])/ch);
+    let a=pg.get(k); if(!a){ a=[]; pg.set(k,a); } a.push(i);
+  }
+  const sg=new Map(); const big=[];
+  for(let i=0;i<items.length;i++){
+    const it=items[i];
+    if(it.t!=='p'||it.a.length>4000){ if(it.t==='p') big.push(i); continue; }
+    const i0=Math.floor((it.bb[0]-bb[0])/cw), i1=Math.floor((it.bb[2]-bb[0])/cw);
+    const j0=Math.floor((it.bb[1]-bb[1])/ch), j1=Math.floor((it.bb[3]-bb[1])/ch);
+    if((i1-i0+1)*(j1-j0+1)>600){ big.push(i); continue; }
+    for(let a=i0;a<=i1;a++) for(let b=j0;b<=j1;b++){
+      const k=a+','+b;
+      let s=sg.get(k); if(!s){ s=[]; sg.set(k,s); } s.push(i);
+    }
+  }
+  return {X:X,Y:Y,T:T,pg:pg,sg:sg,big:big,cw:cw,ch:ch,x0:bb[0],y0:bb[1]};
+}
+function findSnap(w,r){
+  if(!DOC||!DOC.snap) return null;
+  const S=DOC.snap;
+  const cells=(x0,cw,lo,hi)=>{
+    let a=Math.floor((lo-x0)/cw), b=Math.floor((hi-x0)/cw);
+    if(b-a>24){ const m=Math.floor((a+b)/2); a=m-12; b=m+12; }
+    return [a,b];
+  };
+  const ci=cells(S.x0,S.cw,w[0]-r,w[0]+r), cj=cells(S.y0,S.ch,w[1]-r,w[1]+r);
+  let best=null;
+  for(let i=ci[0];i<=ci[1];i++) for(let j=cj[0];j<=cj[1];j++){
+    const a=S.pg.get(i+','+j); if(!a) continue;
+    for(let k=0;k<a.length;k++){
+      const id=a[k];
+      const d=Math.hypot(S.X[id]-w[0],S.Y[id]-w[1]);
+      if(d>r) continue;
+      const t=S.T[id];
+      const sc=d/r+t*0.15;
+      if(!best||sc<best.sc) best={x:S.X[id],y:S.Y[id],t:t,d:d,sc:sc};
+    }
+  }
+  if(best) return best;
+  const seen=new Set(); const cand=[];
+  for(let i=ci[0];i<=ci[1];i++) for(let j=cj[0];j<=cj[1];j++){
+    const a=S.sg.get(i+','+j); if(!a) continue;
+    for(let k=0;k<a.length;k++) if(!seen.has(a[k])){ seen.add(a[k]); cand.push(a[k]); }
+  }
+  for(let k=0;k<S.big.length;k++) if(!seen.has(S.big[k])){ seen.add(S.big[k]); cand.push(S.big[k]); }
+  for(let k=0;k<cand.length;k++){
+    const it=DOC.items[cand[k]];
+    if(it.bb[0]-r>w[0]||it.bb[2]+r<w[0]||it.bb[1]-r>w[1]||it.bb[3]+r<w[1]) continue;
+    const a=it.a, n=a.length/2;
+    for(let q=0;q+1<n;q++){
+      const p=nearOnSeg(a[q*2],a[q*2+1],a[q*2+2],a[q*2+3],w[0],w[1]);
+      if(p.d<r&&(!best||p.d<best.d)) best={x:p.x,y:p.y,t:5,d:p.d,sc:p.d/r+0.75};
+    }
+  }
+  return best;
+}
+function nearOnSeg(x1,y1,x2,y2,px,py){
+  const dx=x2-x1, dy=y2-y1, L=dx*dx+dy*dy;
+  let t=L>0?((px-x1)*dx+(py-y1)*dy)/L:0;
+  t=t<0?0:(t>1?1:t);
+  const x=x1+dx*t, y=y1+dy*t;
+  return {x:x,y:y,d:Math.hypot(x-px,y-py)};
+}
+
+/* ===== 4. 状態 ===== */
+let DOC=null, notes=[], mode='view';
+let picks=[], cur=null, snapAt=null, pend=null;
+let noteH=100, noteRot=0, noteDec=0, dimType='auto';
+let snapOn=true;
+let view={cx:0,cy:0,s:1};
+const NEED={text:1,lead:2,dim:3};
+
+const W=()=>CV.clientWidth||1, H=()=>CV.clientHeight||1;
+const s2w=(sx,sy)=>[view.cx+(sx-W()/2)/view.s, view.cy-(sy-H()/2)/view.s];
+const w2s=(wx,wy)=>[W()/2+(wx-view.cx)*view.s, H()/2-(wy-view.cy)*view.s];
+
+let toastT=null;
+function toast(m,ms){
+  const t=$('toast'); t.textContent=m; t.classList.add('on');
+  clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('on'),ms||1800);
+}
+const cssCache={};
+function getCss(n){
+  if(!cssCache[n]) cssCache[n]=getComputedStyle(document.documentElement).getPropertyValue(n).trim()||'#000';
+  return cssCache[n];
+}
+
+/* ===== 5. 描画 ===== */
+function resize(){
+  const dpr=Math.min(window.devicePixelRatio||1,2.5);
+  const w=Math.max(1,Math.round(CV.clientWidth*dpr)), h=Math.max(1,Math.round(CV.clientHeight*dpr));
+  if(CV.width!==w||CV.height!==h){ CV.width=w; CV.height=h; }
+  CT.setTransform(dpr,0,0,dpr,0,0);
+  draw();
+}
+function fit(){
+  if(!DOC) return;
+  const b=DOC.bb;
+  const w=Math.max(b[2]-b[0],1e-9), h=Math.max(b[3]-b[1],1e-9);
+  view.s=Math.min(W()/w,H()/h)*0.9;
+  if(!isFinite(view.s)||view.s<=0) view.s=1;
+  view.cx=(b[0]+b[2])/2; view.cy=(b[1]+b[3])/2;
+  draw();
+}
+function drawTextW(str,wx,wy,h,rot,color,align){
+  const hs=h*view.s;
+  if(hs<4.5) return;
+  const p=w2s(wx,wy);
+  CT.save();
+  CT.translate(p[0],p[1]); CT.rotate(-rot);
+  CT.fillStyle=color;
+  CT.font='400 '+hs.toFixed(1)+'px '+FONT;
+  CT.textBaseline='alphabetic';
+  CT.textAlign=align||'left';
+  CT.fillText(str,0,0);
+  CT.restore();
+}
+function draw(){
+  if(!CV.clientWidth) return;
+  CT.fillStyle=getCss('--paper');
+  CT.fillRect(0,0,W(),H());
+  if(DOC){
+    const vx0=view.cx-W()/2/view.s, vx1=view.cx+W()/2/view.s;
+    const vy0=view.cy-H()/2/view.s, vy1=view.cy+H()/2/view.s;
+    const path=new Path2D(); const texts=[];
+    for(let i=0;i<DOC.items.length;i++){
+      const it=DOC.items[i], b=it.bb;
+      if(b[2]<vx0||b[0]>vx1||b[3]<vy0||b[1]>vy1) continue;
+      if(it.t==='p'){
+        if((b[2]-b[0])*view.s<0.7&&(b[3]-b[1])*view.s<0.7) continue;
+        const a=it.a, n=a.length/2;
+        let p=w2s(a[0],a[1]); path.moveTo(p[0],p[1]);
+        for(let k=1;k<n;k++){ p=w2s(a[k*2],a[k*2+1]); path.lineTo(p[0],p[1]); }
+        if(it.closed) path.closePath();
+      } else texts.push(it);
+    }
+    CT.strokeStyle=getCss('--draw');
+    CT.lineWidth=1; CT.lineJoin='round'; CT.lineCap='round';
+    CT.stroke(path);
+    const dc=getCss('--draw');
+    for(let i=0;i<texts.length;i++){
+      const t=texts[i];
+      drawTextW(t.s,t.x,t.y,t.h,t.r,dc,(t.ha===2)?'right':((t.ha===1||t.ha===4)?'center':'left'));
+    }
+  }
+  for(let i=0;i<notes.length;i++) drawNote(notes[i],false);
+  if(pend&&pend.preview) drawNote(pend.preview,true);
+  if(mode!=='view'){
+    if(!pend){
+      const t=tempNote();
+      if(t) drawNote(t,true);
+      else if(picks.length&&cur){
+        CT.save(); CT.strokeStyle='#EE8A83'; CT.lineWidth=1.4; CT.setLineDash([5,4]);
+        const a=w2s(picks[picks.length-1][0],picks[picks.length-1][1]), b=w2s(cur[0],cur[1]);
+        CT.beginPath(); CT.moveTo(a[0],a[1]); CT.lineTo(b[0],b[1]); CT.stroke(); CT.restore();
+      }
+    }
+    for(let i=0;i<picks.length;i++) drawCross(picks[i],false);
+    if(cur){ drawCross(cur,true); if(snapAt) drawSnapMark(cur,snapAt.t); }
+  }
+  const hud=$('hud');
+  if(mode!=='view'&&cur){
+    hud.textContent='X '+fmtN(cur[0])+'   Y '+fmtN(cur[1])+(snapAt?'   '+SNAPNAME[snapAt.t]:'');
+    hud.classList.add('on');
+  } else hud.classList.remove('on');
+}
+const fmtN=v=>(Math.abs(v)>=1000?v.toFixed(1):v.toFixed(2));
+
+function drawCross(w,active){
+  const p=w2s(w[0],w[1]);
+  CT.save();
+  CT.strokeStyle=active?getCss('--hi'):'#B08F0C';
+  CT.lineWidth=1;
+  CT.setLineDash([6,5]);
+  CT.beginPath();
+  CT.moveTo(0,p[1]); CT.lineTo(W(),p[1]);
+  CT.moveTo(p[0],0); CT.lineTo(p[0],H());
+  CT.stroke();
+  CT.setLineDash([]);
+  CT.lineWidth=2;
+  CT.beginPath(); CT.arc(p[0],p[1],11,0,Math.PI*2); CT.stroke();
+  CT.fillStyle=active?getCss('--hi'):'#B08F0C';
+  CT.beginPath(); CT.arc(p[0],p[1],2.2,0,Math.PI*2); CT.fill();
+  CT.restore();
+}
+function drawSnapMark(w,t){
+  const p=w2s(w[0],w[1]), c=getCss('--snap'), r=8;
+  CT.save();
+  CT.strokeStyle=c; CT.lineWidth=2; CT.lineJoin='miter';
+  CT.beginPath();
+  if(t===0){ CT.rect(p[0]-r,p[1]-r,r*2,r*2); }
+  else if(t===1){ CT.moveTo(p[0]-r,p[1]+r*0.8); CT.lineTo(p[0]+r,p[1]+r*0.8); CT.lineTo(p[0],p[1]-r*0.9); CT.closePath(); }
+  else if(t===2){ CT.arc(p[0],p[1],r,0,Math.PI*2); }
+  else if(t===3){ CT.moveTo(p[0],p[1]-r); CT.lineTo(p[0]+r,p[1]); CT.lineTo(p[0],p[1]+r); CT.lineTo(p[0]-r,p[1]); CT.closePath(); }
+  else if(t===4){ CT.rect(p[0]-r,p[1]-r,r*2,r*2); CT.moveTo(p[0]-r,p[1]-r); CT.lineTo(p[0]+r,p[1]+r); CT.moveTo(p[0]+r,p[1]-r); CT.lineTo(p[0]-r,p[1]+r); }
+  else { CT.moveTo(p[0]-r,p[1]-r); CT.lineTo(p[0]+r,p[1]+r); CT.moveTo(p[0]+r,p[1]-r); CT.lineTo(p[0]-r,p[1]+r); }
+  CT.stroke();
+  const lb=SNAPNAME[t];
+  CT.font='600 11px '+FONT; CT.textBaseline='middle'; CT.textAlign='left';
+  const tw=CT.measureText(lb).width;
+  CT.fillStyle=c; CT.globalAlpha=.92;
+  CT.fillRect(p[0]+r+5,p[1]-r-9,tw+8,17);
+  CT.globalAlpha=1; CT.fillStyle='#fff';
+  CT.fillText(lb,p[0]+r+9,p[1]-r-1);
+  CT.restore();
+}
+function tempNote(){
+  if(!cur||picks.length+1!==NEED[mode]) return null;
+  if(mode==='text') return null;
+  if(mode==='lead') return {kind:'lead',p:picks[0],p2:cur,h:noteH,rot:0,str:''};
+  return {kind:'dim',p:picks[0],p2:picks[1],p3:cur,h:noteH,dtype:dimType,dec:noteDec,str:''};
+}
+function leaderGeom(n){
+  const tip=n.p, el=n.p2, h=n.h;
+  const dir=(el[0]>=tip[0])?1:-1;
+  const end=[el[0]+dir*h*1.4, el[1]];
+  const ux=el[0]-tip[0], uy=el[1]-tip[1];
+  const L=Math.hypot(ux,uy)||1;
+  const ax=ux/L, ay=uy/L, nx=-ay, ny=ax;
+  const aL=h*0.95, aW=h*0.34;
+  const arrow=[[tip[0],tip[1]],
+    [tip[0]+ax*aL+nx*aW/2, tip[1]+ay*aL+ny*aW/2],
+    [tip[0]+ax*aL-nx*aW/2, tip[1]+ay*aL-ny*aW/2]];
+  return {lines:[[tip,el],[el,end]], arrow:arrow,
+    tx:end[0]+dir*h*0.15, ty:end[1]+h*0.32,
+    align:(dir>0)?'left':'right'};
+}
+function dimGeom(n){
+  const a=n.p, b=n.p2, c=n.p3, h=n.h;
+  let kind=n.dtype||'auto';
+  if(kind==='auto'){
+    const mx=(a[0]+b[0])/2, my=(a[1]+b[1])/2;
+    kind=(Math.abs(c[1]-my)>=Math.abs(c[0]-mx))?'h':'v';
+  }
+  let A,B,len,ang;
+  if(kind==='h'){ A=[a[0],c[1]]; B=[b[0],c[1]]; len=Math.abs(b[0]-a[0]); ang=0; }
+  else if(kind==='v'){ A=[c[0],a[1]]; B=[c[0],b[1]]; len=Math.abs(b[1]-a[1]); ang=Math.PI/2; }
+  else{
+    const vx=b[0]-a[0], vy=b[1]-a[1], L=Math.hypot(vx,vy)||1;
+    const nx=-vy/L, ny=vx/L;
+    const off=(c[0]-a[0])*nx+(c[1]-a[1])*ny;
+    A=[a[0]+nx*off,a[1]+ny*off]; B=[b[0]+nx*off,b[1]+ny*off];
+    len=L; ang=Math.atan2(vy,vx);
+  }
+  while(ang>Math.PI/2+1e-9) ang-=Math.PI;
+  while(ang<=-Math.PI/2-1e-9) ang+=Math.PI;
+  let dx=B[0]-A[0], dy=B[1]-A[1], dl=Math.hypot(dx,dy);
+  if(dl<1e-12){ dx=Math.cos(ang); dy=Math.sin(ang); dl=1; }
+  const ux=dx/dl, uy=dy/dl;
+  const gap=h*0.6, ext=h*0.5, aL=h*0.95, aW=h*0.34;
+  const lines=[];
+  const extLine=function(m,P2){
+    const vx=P2[0]-m[0], vy=P2[1]-m[1], L=Math.hypot(vx,vy);
+    if(L<gap*1.2) return;
+    lines.push([[m[0]+vx/L*gap,m[1]+vy/L*gap],[P2[0]+vx/L*ext,P2[1]+vy/L*ext]]);
+  };
+  extLine(a,A); extLine(b,B);
+  const tri=function(tip,dx2,dy2){
+    const px=-dy2, py=dx2;
+    return [[tip[0],tip[1]],
+      [tip[0]+dx2*aL+px*aW/2, tip[1]+dy2*aL+py*aW/2],
+      [tip[0]+dx2*aL-px*aW/2, tip[1]+dy2*aL-py*aW/2]];
+  };
+  const inside=dl>=aL*2.6;
+  let arrows;
+  if(inside){
+    lines.push([A,B]);
+    arrows=[tri(A,ux,uy),tri(B,-ux,-uy)];
+  }else{
+    lines.push([[A[0]-ux*aL*1.9,A[1]-uy*aL*1.9],[B[0]+ux*aL*1.9,B[1]+uy*aL*1.9]]);
+    arrows=[tri(A,-ux,-uy),tri(B,ux,uy)];
+  }
+  const mid=[(A[0]+B[0])/2,(A[1]+B[1])/2];
+  const tdx=Math.cos(ang), tdy=Math.sin(ang);
+  const upx=-tdy, upy=tdx;
+  let tx,tyv,align;
+  if(inside){ tx=mid[0]+upx*h*0.42; tyv=mid[1]+upy*h*0.42; align='center'; }
+  else{
+    const o=dl/2+aL*2.1+h*0.35;
+    tx=mid[0]+tdx*o+upx*h*0.42; tyv=mid[1]+tdy*o+upy*h*0.42; align='left';
+  }
+  const dec=n.dec||0;
+  const str=(n.str&&n.str.replace(/\s/g,''))?n.str:len.toFixed(dec);
+  return {lines:lines,arrows:arrows,tx:tx,ty:tyv,rot:ang,align:align,str:str,len:len,kind:kind};
+}
+function drawNote(n,ghost){
+  const col=ghost?'#EE8A83':getCss('--mark');
+  if(n.kind==='dim'){
+    const g=dimGeom(n);
+    strokeSet(g.lines,col);
+    fillTris(g.arrows,col);
+    drawTextW(g.str,g.tx,g.ty,n.h,g.rot,col,g.align);
+    return;
+  }
+  const lines=n.str.split('\n');
+  if(n.kind==='text'){
+    const dx=Math.sin(n.rot), dy=-Math.cos(n.rot);
+    for(let k=0;k<lines.length;k++)
+      drawTextW(lines[k],n.p[0]+dx*k*n.h*1.6,n.p[1]+dy*k*n.h*1.6,n.h,n.rot,col,'left');
+    return;
+  }
+  const g=leaderGeom(n);
+  strokeSet(g.lines,col);
+  fillTris([g.arrow],col);
+  for(let k=0;k<lines.length;k++)
+    drawTextW(lines[k],g.tx,g.ty-k*n.h*1.6,n.h,0,col,g.align);
+}
+function strokeSet(segs,col){
+  CT.save(); CT.strokeStyle=col; CT.lineWidth=1.6; CT.beginPath();
+  for(let k=0;k<segs.length;k++){
+    const a=w2s(segs[k][0][0],segs[k][0][1]);
+    const b=w2s(segs[k][1][0],segs[k][1][1]);
+    CT.moveTo(a[0],a[1]); CT.lineTo(b[0],b[1]);
+  }
+  CT.stroke(); CT.restore();
+}
+function fillTris(tris,col){
+  CT.save(); CT.fillStyle=col; CT.beginPath();
+  for(let k=0;k<tris.length;k++){
+    const p=tris[k].map(q=>w2s(q[0],q[1]));
+    CT.moveTo(p[0][0],p[0][1]); CT.lineTo(p[1][0],p[1][1]); CT.lineTo(p[2][0],p[2][1]);
+    CT.closePath();
+  }
+  CT.fill(); CT.restore();
+}
+
+/* ===== 6. 操作 ===== */
+const OFFSET=62;
+const pts=new Map();
+let gest=null;
+CV.addEventListener('pointerdown',function(ev){
+  if(!DOC) return;
+  try{ CV.setPointerCapture(ev.pointerId); }catch(e){}
+  pts.set(ev.pointerId,{x:ev.clientX,y:ev.clientY});
+  if(pts.size>=2){ gest=startPinch(); return; }
+  const r=CV.getBoundingClientRect();
+  gest={type:(mode==='view')?'pan':'place',x:ev.clientX,y:ev.clientY,
+        cx:view.cx,cy:view.cy,r:r};
+  if(gest.type==='place') setCursor(ev.clientX-r.left, ev.clientY-r.top-OFFSET);
+});
+CV.addEventListener('pointermove',function(ev){
+  if(!pts.has(ev.pointerId)||!gest) return;
+  pts.set(ev.pointerId,{x:ev.clientX,y:ev.clientY});
+  if(gest.type==='pinch'){ if(pts.size>=2) movePinch(); }
+  else if(gest.type==='pan'){
+    view.cx=gest.cx-(ev.clientX-gest.x)/view.s;
+    view.cy=gest.cy+(ev.clientY-gest.y)/view.s;
+    draw();
+  } else if(gest.type==='place'&&pts.size===1){
+    setCursor(ev.clientX-gest.r.left, ev.clientY-gest.r.top-OFFSET);
+  }
+});
+function endP(ev){ pts.delete(ev.pointerId); gest=null; }
+CV.addEventListener('pointerup',endP);
+CV.addEventListener('pointercancel',endP);
+CV.addEventListener('wheel',function(ev){
+  if(!DOC) return;
+  ev.preventDefault();
+  const r=CV.getBoundingClientRect();
+  zoomAt(ev.clientX-r.left,ev.clientY-r.top,Math.pow(0.9,ev.deltaY/100));
+},{passive:false});
+
+function startPinch(){
+  const a=Array.from(pts.values());
+  return {type:'pinch',d:Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y),
+    mx:(a[0].x+a[1].x)/2,my:(a[0].y+a[1].y)/2,
+    cx:view.cx,cy:view.cy,s:view.s,r:CV.getBoundingClientRect()};
+}
+function movePinch(){
+  const a=Array.from(pts.values());
+  const d=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y);
+  if(!gest.d) return;
+  const ns=Math.max(1e-9,gest.s*(d/gest.d));
+  const sx=gest.mx-gest.r.left, sy=gest.my-gest.r.top;
+  const wx=gest.cx+(sx-W()/2)/gest.s, wy=gest.cy-(sy-H()/2)/gest.s;
+  const nx=(a[0].x+a[1].x)/2-gest.r.left, ny=(a[0].y+a[1].y)/2-gest.r.top;
+  view.s=ns;
+  view.cx=wx-(nx-W()/2)/ns;
+  view.cy=wy+(ny-H()/2)/ns;
+  draw();
+}
+function zoomAt(sx,sy,k){
+  const w=s2w(sx,sy);
+  view.s=Math.max(1e-9,view.s*k);
+  view.cx=w[0]-(sx-W()/2)/view.s;
+  view.cy=w[1]+(sy-H()/2)/view.s;
+  draw();
+}
+function setCursor(sx,sy){
+  const w=s2w(sx,sy);
+  const sn=snapOn?findSnap(w,26/view.s):null;
+  cur=sn?[sn.x,sn.y]:w;
+  snapAt=sn;
+  draw();
+}
+
+/* ===== 7. モード ===== */
+const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+function ctxMsg(a,b){ $('ctxmsg').innerHTML=esc(a)+(b?'<small>'+esc(b)+'</small>':''); }
+const MSG={
+  text:[['文字を置く位置','なぞると指の少し上に十字が出ます']],
+  lead:[['矢印で指す位置','なぞると指の少し上に十字が出ます'],
+        ['文字を置く位置','ここが引出線の折れ点になります']],
+  dim:[['寸法の1点目','なぞると指の少し上に十字が出ます'],
+       ['寸法の2点目','もう一方の測る点'],
+       ['寸法線の位置','上下に振ると水平、左右に振ると垂直']]
+};
+function stepMsg(){
+  const m=MSG[mode]; if(!m) return;
+  const k=Math.min(picks.length,m.length-1);
+  ctxMsg(m[k][0],m[k][1]);
+  $('cCancel').textContent=picks.length?'1つ戻る':'やめる';
+}
+function setMode(m){
+  mode=m; picks=[]; cur=null; snapAt=null;
+  $('mView').classList.toggle('on',m==='view');
+  $('mText').classList.toggle('on',m==='text');
+  $('mLead').classList.toggle('on',m==='lead');
+  $('mDim').classList.toggle('on',m==='dim');
+  if(m==='view') $('ctx').classList.remove('on');
+  else{
+    cur=s2w(W()/2,H()/2);
+    $('ctx').classList.add('on');
+    stepMsg();
+  }
+  draw();
+}
+$('mView').onclick=()=>setMode('view');
+$('mText').onclick=()=>setMode(mode==='text'?'view':'text');
+$('mLead').onclick=()=>setMode(mode==='lead'?'view':'lead');
+$('mDim').onclick=()=>setMode(mode==='dim'?'view':'dim');
+$('bFit').onclick=fit;
+$('bSnap').onclick=function(){
+  snapOn=!snapOn;
+  $('bSnap').classList.toggle('on',snapOn);
+  toast(snapOn?'吸着オン':'吸着オフ',1200);
+};
+$('cCancel').onclick=function(){
+  if(picks.length){ cur=picks.pop(); snapAt=null; stepMsg(); draw(); }
+  else setMode('view');
+};
+$('cOk').onclick=function(){
+  if(!cur) return;
+  picks.push([cur[0],cur[1]]);
+  if(picks.length<NEED[mode]){
+    const p=w2s(cur[0],cur[1]);
+    cur=s2w(p[0]+95,p[1]-95);
+    snapAt=null;
+    stepMsg(); draw();
+    return;
+  }
+  openSheet();
+};
+
+/* ===== 8. 入力シート ===== */
+function autoVal(h){
+  if(!pend||pend.kind!=='dim') return '';
+  return dimGeom({p:pend.p,p2:pend.p2,p3:pend.p3,h:h||noteH,
+    dtype:dimType,dec:noteDec,str:''}).str;
+}
+function openSheet(){
+  pend={kind:mode,p:picks[0],p2:picks[1]||null,p3:picks[2]||null,preview:null};
+  const isDim=(pend.kind==='dim');
+  $('sTitle').textContent=isDim?'DIMENSION':'NOTE';
+  $('taRow').style.display=isDim?'none':'block';
+  $('dimRow').style.display=isDim?'flex':'none';
+  $('decRow').style.display=isDim?'flex':'none';
+  $('dirRow').style.display=isDim?'flex':'none';
+  $('rotRow').style.display=(pend.kind==='text')?'flex':'none';
+  $('ta').value=''; $('dVal').value='';
+  $('hVal').value=trimNum(noteH);
+  setRot(noteRot); setDec(noteDec); setDir(dimType);
+  $('sheet').classList.add('on'); $('veil').classList.add('on');
+  livePreview();
+  if(!isDim) setTimeout(()=>$('ta').focus(),240);
+}
+function closeSheet(){
+  $('sheet').classList.remove('on'); $('veil').classList.remove('on');
+  $('ta').blur(); $('dVal').blur(); pend=null; draw();
+}
+const trimNum=v=>String(Math.round(v*1000)/1000);
+function segSet(id,attr,val){
+  const ch=$(id).children;
+  for(let i=0;i<ch.length;i++) ch[i].classList.toggle('on',String(ch[i].dataset[attr])===String(val));
+}
+function setRot(r){ noteRot=r; segSet('rotSeg','r',r); }
+function setDec(c){ noteDec=c; segSet('decSeg','c',c); }
+function setDir(d){ dimType=d; segSet('dirSeg','d',d); }
+function livePreview(){
+  if(!pend) return;
+  const h=parseFloat($('hVal').value)||noteH;
+  if(pend.kind==='dim'){
+    pend.preview={kind:'dim',p:pend.p,p2:pend.p2,p3:pend.p3,h:h,
+      dtype:dimType,dec:noteDec,str:$('dVal').value.trim()};
+    $('dVal').placeholder=autoVal(h);
+  }else{
+    const s=$('ta').value;
+    pend.preview=s.replace(/\s/g,'')?{kind:pend.kind,p:pend.p,p2:pend.p2,h:h,
+      rot:noteRot*Math.PI/180,str:s}:null;
+  }
+  draw();
+}
+$('veil').onclick=closeSheet;
+$('sCancel').onclick=closeSheet;
+$('hMinus').onclick=()=>{ $('hVal').value=trimNum((parseFloat($('hVal').value)||noteH)/1.25); livePreview(); };
+$('hPlus').onclick=()=>{ $('hVal').value=trimNum((parseFloat($('hVal').value)||noteH)*1.25); livePreview(); };
+$('hVal').oninput=livePreview;
+$('ta').oninput=livePreview;
+$('dVal').oninput=livePreview;
+$('dReset').onclick=()=>{ $('dVal').value=''; livePreview(); };
+$('rotSeg').onclick=function(ev){
+  const b=ev.target.closest('button'); if(!b) return;
+  setRot(Number(b.dataset.r)); livePreview();
+};
+$('decSeg').onclick=function(ev){
+  const b=ev.target.closest('button'); if(!b) return;
+  setDec(Number(b.dataset.c)); livePreview();
+};
+$('dirSeg').onclick=function(ev){
+  const b=ev.target.closest('button'); if(!b) return;
+  setDir(String(b.dataset.d)); livePreview();
+};
+$('sAdd').onclick=function(){
+  if(!pend) return;
+  const h=parseFloat($('hVal').value);
+  if(!(h>0)){ toast('文字高さを入れてください'); return; }
+  noteH=h;
+  if(pend.kind==='dim'){
+    notes.push({kind:'dim',p:pend.p,p2:pend.p2,p3:pend.p3,h:h,
+      dtype:dimType,dec:noteDec,str:$('dVal').value.trim()});
+  }else{
+    const s=$('ta').value.replace(/\s+$/,'');
+    if(!s.replace(/\s/g,'')){ toast('文字が空です'); return; }
+    notes.push({kind:pend.kind,p:pend.p,p2:pend.p2,h:h,rot:noteRot*Math.PI/180,str:s});
+  }
+  const m=mode, k=pend.kind;
+  closeSheet(); refreshCounts(); setMode(m);
+  toast(k==='dim'?'寸法を追加しました':'注記を追加しました');
+};
+$('bUndo').onclick=function(){
+  if(!notes.length) return;
+  notes.pop(); refreshCounts(); draw(); toast('1つ戻しました');
+};
+function refreshCounts(){
+  $('bUndo').disabled=notes.length===0;
+  $('mSave').disabled=notes.length===0;
+  $('mSave').innerHTML='<span class="ic">⤓</span>保存'+(notes.length?' '+notes.length:'');
+}
+if(window.visualViewport){
+  const vv=window.visualViewport;
+  const upd=function(){
+    const gap=Math.max(0,window.innerHeight-vv.height-vv.offsetTop);
+    document.documentElement.style.setProperty('--kb',gap+'px');
+  };
+  vv.addEventListener('resize',upd);
+  vv.addEventListener('scroll',upd);
+}
+
+/* ===== 9. 読み込み ===== */
+$('bOpen').onclick=()=>$('fi').click();
+$('bOpen2').onclick=()=>$('fi').click();
+$('fi').onchange=function(e){ const f=e.target.files[0]; if(f) load(f); e.target.value=''; };
+
+function niceH(v){
+  if(!(v>0)||!isFinite(v)) return 100;
+  const p=Math.pow(10,Math.floor(Math.log10(v))), m=v/p;
+  return (m<1.5?1:m<3.5?2:m<7.5?5:10)*p;
+}
+async function load(file){
+  try{
+    toast('読み込み中…',120000);
+    await new Promise(r=>setTimeout(r,40));
+    const bytes=new Uint8Array(await file.arrayBuffer());
+    if(new TextDecoder('windows-1252').decode(bytes.subarray(0,18))==='AutoCAD Binary DXF'){
+      toast('バイナリDXFは開けません。ASCII形式のDXFで保存し直してください',4500); return;
+    }
+    const enc=detectEnc(bytes);
+    const txt=new TextDecoder(enc).decode(bytes);
+    const st=lineStarts(bytes);
+    const P=makePairs(txt);
+    if(P.length<4){ toast('DXFとして読み取れませんでした',3000); return; }
+    const D=scan(P);
+    if(D.ins.ENTITIES===undefined){ toast('ENTITIESセクションが見つかりません',3000); return; }
+    const B=buildItems(D);
+    const eol=(st.length>1&&st[1]>=2&&bytes[st[1]-2]===13)?'\r\n':'\n';
+    const ver=String((D.vars['$ACADVER']||{}).v||'AC1015').trim();
+    DOC={bytes:bytes,D:D,starts:st,enc:enc,eol:eol,ver:ver,
+      modern:['AC1002','AC1004','AC1006','AC1009'].indexOf(ver)<0,
+      items:B.items,bb:B.bb,snap:B.snap,name:file.name};
+    notes=[]; refreshCounts();
+    $('fname').textContent=file.name+' · '+enc.toUpperCase()+' · '+ver+' · '+B.items.length;
+    $('drop').style.display='none';
+    $('mText').disabled=false; $('mLead').disabled=false;
+    $('mDim').disabled=false; $('bFit').disabled=false;
+    noteH=niceH(Math.max(B.bb[2]-B.bb[0],B.bb[3]-B.bb[1])/70);
+    fit(); setMode('view');
+    toast(B.items.length?('読み込みました（'+B.items.length+'要素）'):'図形が見つかりませんでした',2400);
+  }catch(err){
+    console.error(err);
+    toast('読み込みに失敗しました: '+err.message,5000);
+  }
+}
+
+/* ===== 10. 書き出し（元バイト列に差し込み） ===== */
+const revCache={};
+function revMap(enc){
+  if(revCache[enc]) return revCache[enc];
+  const buf=[], idx=[];
+  for(let b=0x20;b<256;b++){ if(b===10||b===13) continue; buf.push(b,10); idx.push([b]); }
+  for(let hi=0x81;hi<=0xFE;hi++) for(let lo=0x40;lo<=0xFE;lo++){ buf.push(hi,lo,10); idx.push([hi,lo]); }
+  const parts=new TextDecoder(enc).decode(new Uint8Array(buf)).split('\n');
+  const m=new Map();
+  for(let i=0;i<idx.length;i++){
+    const p=parts[i];
+    if(p&&p.length===1&&p!=='\uFFFD'&&!m.has(p)) m.set(p,idx[i]);
+  }
+  revCache[enc]=m; return m;
+}
+function encStr(str,enc){
+  if(enc==='utf-8') return new TextEncoder().encode(str);
+  const m=revMap(enc), out=[];
+  for(const ch of str){
+    const cp=ch.codePointAt(0);
+    if(cp<0x80){ out.push(cp); continue; }
+    const b=m.get(ch);
+    if(b) for(let i=0;i<b.length;i++) out.push(b[i]);
+    else out.push(0x3F);
+  }
+  return new Uint8Array(out);
+}
+const fx=v=>{ const s=String(Math.round(v*1e8)/1e8); return /[.eE]/.test(s)?s:s+'.0'; };
+function splice(bytes,ops){
+  ops.sort((a,b)=>a.start-b.start);
+  let total=bytes.length;
+  for(let i=0;i<ops.length;i++) total+=ops[i].bytes.length-(ops[i].end-ops[i].start);
+  const out=new Uint8Array(total);
+  let p=0,at=0;
+  for(let i=0;i<ops.length;i++){
+    const o=ops[i];
+    out.set(bytes.subarray(at,o.start),p); p+=o.start-at;
+    out.set(o.bytes,p); p+=o.bytes.length; at=o.end;
+  }
+  out.set(bytes.subarray(at),p);
+  return out;
+}
+function buildOut(){
+  const D=DOC.D, eol=DOC.eol, enc=DOC.enc, mod=DOC.modern;
+  let hx=Math.max(D.maxH,0x100);
+  const nh=()=>{ hx++; return hx.toString(16).toUpperCase(); };
+  const hasLayer=!!D.layers['_NOTE'], hasStyle=!!D.styles['_NOTE'];
+  const useStyle=hasStyle||D.ins['STYLE']!==undefined;
+  const chunk=a=>encStr(a.join(eol)+eol,enc);
+
+  const L=[]; const P=(c,v)=>{ L.push(String(c)); L.push(String(v)); };
+  const ent=(type,sub)=>{
+    P(0,type);
+    if(mod){ P(5,nh()); P(100,'AcDbEntity'); }
+    P(8,'_NOTE'); P(62,1);
+    if(mod&&sub) P(100,sub);
+  };
+  const txtEnt=(s,x,y,h,rot,al)=>{
+    ent('TEXT','AcDbText');
+    P(10,fx(x)); P(20,fx(y)); P(30,'0.0'); P(40,fx(h)); P(1,s);
+    if(rot) P(50,fx(rot*180/Math.PI));
+    if(useStyle) P(7,'_NOTE');
+    if(al){ P(72,al); P(11,fx(x)); P(21,fx(y)); P(31,'0.0'); }
+    if(mod) P(100,'AcDbText');
+  };
+  const AL={left:0,center:1,right:2};
+  const lineEnt=(a,b)=>{
+    ent('LINE','AcDbLine');
+    P(10,fx(a[0])); P(20,fx(a[1])); P(30,'0.0');
+    P(11,fx(b[0])); P(21,fx(b[1])); P(31,'0.0');
+  };
+  const triEnt=p=>{
+    ent('SOLID','AcDbTrace');
+    P(10,fx(p[0][0])); P(20,fx(p[0][1])); P(30,'0.0');
+    P(11,fx(p[1][0])); P(21,fx(p[1][1])); P(31,'0.0');
+    P(12,fx(p[2][0])); P(22,fx(p[2][1])); P(32,'0.0');
+    P(13,fx(p[2][0])); P(23,fx(p[2][1])); P(33,'0.0');
+  };
+
+  for(let i=0;i<notes.length;i++){
+    const n=notes[i];
+    if(n.kind==='dim'){
+      const g=dimGeom(n);
+      for(let k=0;k<g.lines.length;k++) lineEnt(g.lines[k][0],g.lines[k][1]);
+      for(let k=0;k<g.arrows.length;k++) triEnt(g.arrows[k]);
+      txtEnt(g.str,g.tx,g.ty,n.h,g.rot,AL[g.align]);
+      continue;
+    }
+    const lines=n.str.split('\n');
+    if(n.kind==='text'){
+      const dx=Math.sin(n.rot), dy=-Math.cos(n.rot);
+      for(let k=0;k<lines.length;k++){
+        if(!lines[k].replace(/\s/g,'')) continue;
+        txtEnt(lines[k],n.p[0]+dx*k*n.h*1.6,n.p[1]+dy*k*n.h*1.6,n.h,n.rot,0);
+      }
+    } else {
+      const g=leaderGeom(n);
+      for(let k=0;k<g.lines.length;k++) lineEnt(g.lines[k][0],g.lines[k][1]);
+      triEnt(g.arrow);
+      for(let k=0;k<lines.length;k++){
+        if(!lines[k].replace(/\s/g,'')) continue;
+        txtEnt(lines[k],g.tx,g.ty-k*n.h*1.6,n.h,0,AL[g.align]);
+      }
+    }
+  }
+
+  const at=li=>DOC.starts[li];
+  const ops=[{start:at(D.ins.ENTITIES),end:at(D.ins.ENTITIES),bytes:chunk(L)}];
+
+  if(!hasLayer&&D.ins['LAYER']!==undefined){
+    const A=[]; const Q=(c,v)=>{ A.push(String(c)); A.push(String(v)); };
+    Q(0,'LAYER');
+    if(mod){ Q(5,nh()); Q(100,'AcDbSymbolTableRecord'); Q(100,'AcDbLayerTableRecord'); }
+    Q(2,'_NOTE'); Q(70,0); Q(62,1); Q(6,'CONTINUOUS');
+    ops.push({start:at(D.ins['LAYER']),end:at(D.ins['LAYER']),bytes:chunk(A)});
+  }
+  if(!hasStyle&&D.ins['STYLE']!==undefined){
+    const A=[]; const Q=(c,v)=>{ A.push(String(c)); A.push(String(v)); };
+    Q(0,'STYLE');
+    if(mod){ Q(5,nh()); Q(100,'AcDbSymbolTableRecord'); Q(100,'AcDbTextStyleTableRecord'); }
+    Q(2,'_NOTE'); Q(70,0); Q(40,'0.0'); Q(41,'1.0'); Q(50,'0.0'); Q(71,0); Q(42,'2.5');
+    Q(3,'msgothic.ttc'); Q(4,'');
+    ops.push({start:at(D.ins['STYLE']),end:at(D.ins['STYLE']),bytes:chunk(A)});
+  }
+  const hs=D.vars['$HANDSEED'];
+  if(hs&&hs.li+1<DOC.starts.length){
+    ops.push({start:DOC.starts[hs.li],end:DOC.starts[hs.li+1],
+      bytes:encStr((hx+32).toString(16).toUpperCase()+eol,enc)});
+  }
+  return splice(DOC.bytes,ops);
+}
+
+$('mSave').onclick=async function(){
+  if(!DOC||!notes.length) return;
+  try{
+    toast('書き出し中…',120000);
+    await new Promise(r=>setTimeout(r,40));
+    const out=buildOut();
+    const name=DOC.name.replace(/\.dxf$/i,'')+'_note.dxf';
+    const blob=new Blob([out],{type:'application/octet-stream'});
+    let shared=false;
+    try{
+      const f=new File([out],name,{type:'application/dxf'});
+      if(navigator.canShare&&navigator.canShare({files:[f]})){
+        await navigator.share({files:[f],title:name});
+        shared=true;
+      }
+    }catch(e){
+      if(e&&e.name==='AbortError'){ toast('共有をやめました'); return; }
+    }
+    if(!shared){
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a');
+      a.href=url; a.download=name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),5000);
+    }
+    toast('保存しました：'+name,2600);
+  }catch(err){
+    console.error(err);
+    toast('書き出しに失敗しました: '+err.message,5000);
+  }
+};
+
+/* ===== init ===== */
+if(window.ResizeObserver) new ResizeObserver(resize).observe($('stage'));
+window.addEventListener('resize',resize);
+window.addEventListener('orientationchange',()=>setTimeout(resize,300));
+document.addEventListener('gesturestart',e=>e.preventDefault());
+resize(); refreshCounts();
+</script>
+</body>
+</html>
